@@ -15,6 +15,11 @@ struct sc_mouse_capture {
     // RGUI) must be pressed. This variable tracks the pressed capture key.
     SDL_Keycode mouse_capture_key_pressed;
 
+    // Virtual cursor position accumulated from relative mouse motion deltas.
+    // Used to detect when the cursor reaches the window edge and release
+    // the mouse capture automatically.
+    int32_t virtual_x;
+    int32_t virtual_y;
 };
 
 void

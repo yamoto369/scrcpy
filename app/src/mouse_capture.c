@@ -9,6 +9,12 @@ sc_mouse_capture_init(struct sc_mouse_capture *mc, SDL_Window *window,
     mc->window = window;
     mc->sdl_mouse_capture_keys = sc_shortcut_mods_to_sdl(shortcut_mods);
     mc->mouse_capture_key_pressed = SDLK_UNKNOWN;
+
+    // Initialize virtual cursor to window center
+    int w, h;
+    SDL_GetWindowSize(window, &w, &h);
+    mc->virtual_x = w / 2;
+    mc->virtual_y = h / 2;
 }
 
 static inline bool
@@ -57,12 +63,42 @@ sc_mouse_capture_handle_event(struct sc_mouse_capture *mc,
             break;
         }
         case SDL_MOUSEWHEEL:
-        case SDL_MOUSEMOTION:
         case SDL_MOUSEBUTTONDOWN:
             if (!sc_mouse_capture_is_active(mc)) {
                 // The mouse will be captured on SDL_MOUSEBUTTONUP, so consume
                 // the event
                 return true;
+            }
+            break;
+        case SDL_MOUSEMOTION:
+            if (!sc_mouse_capture_is_active(mc)) {
+                // The mouse will be captured on SDL_MOUSEBUTTONUP, so consume
+                // the event
+                return true;
+            }
+            // Accumulate relative motion into virtual cursor position
+            mc->virtual_x += event->motion.xrel;
+            mc->virtual_y += event->motion.yrel;
+
+            {
+                int w, h;
+                SDL_GetWindowSize(mc->window, &w, &h);
+
+                // Detect if virtual cursor has reached (or passed) the edge
+                bool at_edge = mc->virtual_x <= 0
+                            || mc->virtual_y <= 0
+                            || mc->virtual_x >= w - 1
+                            || mc->virtual_y >= h - 1;
+
+                // Clamp to window bounds
+                if (mc->virtual_x < 0) mc->virtual_x = 0;
+                if (mc->virtual_y < 0) mc->virtual_y = 0;
+                if (mc->virtual_x > w - 1) mc->virtual_x = w - 1;
+                if (mc->virtual_y > h - 1) mc->virtual_y = h - 1;
+
+                if (at_edge) {
+                    sc_mouse_capture_set_active(mc, false);
+                }
             }
             break;
         case SDL_MOUSEBUTTONUP:
@@ -100,9 +136,21 @@ sc_mouse_capture_set_active(struct sc_mouse_capture *mc, bool capture) {
         if (outside_window) {
             SDL_WarpMouseInWindow(mc->window, w / 2, h / 2);
         }
+
+        // Reset virtual cursor to window center so that the cursor does not
+        // immediately re-trigger an edge release after being re-captured.
+        mc->virtual_x = w / 2;
+        mc->virtual_y = h / 2;
     }
 #else
-    (void) mc;
+    if (capture) {
+        // Reset virtual cursor to window center so that the cursor does not
+        // immediately re-trigger an edge release after being re-captured.
+        int w, h;
+        SDL_GetWindowSize(mc->window, &w, &h);
+        mc->virtual_x = w / 2;
+        mc->virtual_y = h / 2;
+    }
 #endif
     if (SDL_SetRelativeMouseMode(capture)) {
         LOGE("Could not set relative mouse mode to %s: %s",
